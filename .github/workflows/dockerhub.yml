@@ -1,0 +1,95 @@
+# bigmudcake v1.00 - Build Docker files and push to Docker Hub
+
+name: dockerhub
+
+
+# Only execute this action on a commit to "CHANGELOG.md" (new version added to file)
+# https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-only-when-a-push-affects-specific-files
+
+on:
+  push:
+    branches:
+      - "main"
+    paths:
+      - "**CHANGELOG.md"
+  workflow_dispatch:
+    inputs:
+      buildtype:
+        description: 'Build Type'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+        - dev
+        - release
+      rundesc:
+        description: 'Run Description'
+        required: true
+        default: 'dev build for testing'
+        type: string
+
+
+run-name: ${{ inputs.rundesc }}
+
+
+env:
+  # github.repository as <account>/<repo>
+  RELEASEHUB_IMAGE: ${{ github.repository }}
+  RELEASEHUB_USER: ${{ github.actor }}
+  RELEASEHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+  #
+  # docker hub details for dev builds
+  DEVHUB_IMAGE: ${{ vars.DEVHUB_IMAGE }} 
+  DEVHUB_USER: ${{ vars.DEVHUB_USER }} 
+  DEVHUB_TOKEN: ${{ secrets.DEVHUB_TOKEN }}
+
+
+# jobs Checkout, Login to Docker Hub, Set up Docker Buildx, Build and push 
+# using instructions from https://docs.docker.com/build/ci/github-actions/
+
+# Pushing README.md to Hub description using peter-evans/dockerhub-description@v4
+# from repository https://github.com/peter-evans/dockerhub-description
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      -
+        name: Set DOCKERHUB variables
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" && "${{ inputs.buildtype }}" == "dev" ]]; then
+            echo "DOCKERHUB_IMAGE=${{ env.DEVHUB_IMAGE }}" >> $GITHUB_ENV
+            echo "DOCKERHUB_USER=${{ env.DEVHUB_USER }}" >> $GITHUB_ENV
+            echo "DOCKERHUB_TOKEN=${{ env.DEVHUB_TOKEN }}" >> $GITHUB_ENV
+          else
+            echo "DOCKERHUB_IMAGE=${{ env.RELEASEHUB_IMAGE }}" >> $GITHUB_ENV
+            echo "DOCKERHUB_USER=${{ env.RELEASEHUB_USER }}" >> $GITHUB_ENV
+            echo "DOCKERHUB_TOKEN=${{ env.RELEASEHUB_TOKEN }}" >> $GITHUB_ENV
+          fi
+      -
+        name: Checkout
+        uses: actions/checkout@v4
+      -
+        name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USER }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
+      -
+        name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      -
+        name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ env.DOCKERHUB_IMAGE }}:latest
+      -
+        name: Docker Hub Description
+        uses: peter-evans/dockerhub-description@v4
+        with:
+          username: ${{ env.DOCKERHUB_USER }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
+          repository: ${{ env.DOCKERHUB_IMAGE }}
